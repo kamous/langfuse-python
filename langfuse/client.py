@@ -2729,7 +2729,7 @@ class StatefulGenerationClient(StatefulClient):
             self.log.debug(
                 f"Update generation {_filter_io_from_event_body(generation_body)}..."
             )
-
+            generation_body = _preprocess_request_body(generation_body)
             request = UpdateGenerationBody(**generation_body)
 
             event = {
@@ -3601,3 +3601,35 @@ def _filter_io_from_event_body(event_body: Dict[str, Any]):
     return {
         k: v for k, v in event_body.items() if k not in ("input", "output", "metadata")
     }
+
+
+def _preprocess_request_body(body: dict) -> dict:
+    """预处理请求体，修复验证错误，包括处理嵌套字典中的None值和移除不符合要求的字段，兼容火山、Deepseek API
+    
+    Args:
+        body: 原始请求体
+        
+    Returns:
+        处理后的请求体
+    """
+    result = body.copy()
+    # print(f"before _preprocess_request_body: {result}")
+    # 处理 usage_details 中的 None 值
+    if "usage_details" in result and result["usage_details"]:
+        def process_dict(d: dict) -> dict:
+            processed = {}
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    processed[k] = process_dict(v)
+                else:
+                    processed[k] = 0 if v is None else v
+            return processed
+        
+        result["usage_details"] = process_dict(result["usage_details"])
+    
+    # 移除可能导致验证错误的空值字段
+    for field in ["level", "model_parameters", "cost_details"]:
+        if field in result and result[field] is None:
+            result.pop(field)
+    
+    return result
